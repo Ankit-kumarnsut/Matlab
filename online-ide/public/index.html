@@ -1,0 +1,139 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Online IDE</title>
+    <style>
+      html, body { height: 100%; margin: 0; }
+      body { display: flex; flex-direction: column; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+      header { padding: 10px 14px; background: #0f172a; color: #e2e8f0; display:flex; gap:12px; align-items:center; }
+      header h1 { font-size: 16px; margin: 0 10px 0 0; font-weight: 600; }
+      header select, header button, header input { padding: 8px 10px; border-radius: 8px; border: 1px solid #334155; background: #0b1220; color: #e2e8f0; }
+      header button { background: #2563eb; border-color: #1d4ed8; cursor: pointer; }
+      header button:hover { background: #1d4ed8; }
+      .container { flex: 1; display: grid; grid-template-columns: 1fr 380px; gap: 10px; padding: 10px; background: #0b1020; }
+      .pane { background: #0b1220; border: 1px solid #1f2a44; border-radius: 10px; overflow: hidden; display:flex; flex-direction:column; }
+      .pane h3 { margin: 0; padding: 8px 12px; border-bottom: 1px solid #1f2a44; font-size: 13px; color: #cbd5e1; background: #0f172a; }
+      #editor { width: 100%; height: 100%; }
+      .section { padding: 8px; display:flex; flex-direction:column; gap:8px; }
+      textarea { width: 100%; height: 100px; background: #0b1020; color: #e2e8f0; border: 1px solid #1f2a44; border-radius: 8px; padding: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+      pre { margin: 0; padding: 8px; background: #0b1020; color: #e2e8f0; border: 1px solid #1f2a44; border-radius: 8px; white-space: pre-wrap; max-height: 220px; overflow: auto; }
+      footer { padding: 8px 12px; font-size: 12px; color: #94a3b8; background: #0f172a; border-top: 1px solid #1f2a44; }
+      .split { display:flex; gap:8px; align-items:center; }
+      .status { font-size: 12px; color: #94a3b8; margin-left: auto; }
+    </style>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+    <link rel="preconnect" href="https://unpkg.com" />
+  </head>
+  <body>
+    <header>
+      <h1>Online IDE</h1>
+      <label>Language
+        <select id="language">
+          <option value="javascript">JavaScript</option>
+          <option value="python">Python</option>
+          <option value="cpp">C++</option>
+        </select>
+      </label>
+      <button id="runBtn">Run ▶</button>
+      <span class="status" id="status"></span>
+    </header>
+
+    <div class="container">
+      <div class="pane">
+        <h3>Editor</h3>
+        <div id="editor"></div>
+      </div>
+      <div class="pane">
+        <h3>IO</h3>
+        <div class="section">
+          <label for="stdin">Stdin</label>
+          <textarea id="stdin" placeholder="Optional input passed to program..."></textarea>
+        </div>
+        <div class="section">
+          <div class="split">
+            <span>Output</span>
+            <button id="clearOutput" style="margin-left:auto">Clear</button>
+          </div>
+          <pre id="output"></pre>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      Monaco Editor with basic IntelliSense. C++ compiled with g++ (C++17). Execution timeouts applied.
+    </footer>
+
+    <script>window.require = { paths: { 'vs': 'https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min/vs' } };</script>
+    <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min/vs/loader.js"></script>
+    <script>
+      const initialSamples = {
+        javascript: `// JS sample\nfunction fib(n){return n<2?n:fib(n-1)+fib(n-2)}\nconsole.log('fib(10)=', fib(10));`,
+        python: `# Python sample\nimport sys\nprint('Hello from Python!')\nprint('stdin:', sys.stdin.read())`,
+        cpp: `// C++ sample\n#include <bits/stdc++.h>\nusing namespace std;\nint main(){\n  ios::sync_with_stdio(false);cin.tie(nullptr);\n  string s; getline(cin, s);\n  cout << \"Hello C++! you typed: \" << s << \"\\n\";\n  return 0;\n}`
+      };
+
+      let editor, currentLanguage = 'javascript';
+      const langSelect = document.getElementById('language');
+      const runBtn = document.getElementById('runBtn');
+      const outputEl = document.getElementById('output');
+      const stdinEl = document.getElementById('stdin');
+      const statusEl = document.getElementById('status');
+
+      function setStatus(msg){ statusEl.textContent = msg || ''; }
+
+      require(['vs/editor/editor.main'], function() {
+        editor = monaco.editor.create(document.getElementById('editor'), {
+          value: initialSamples[currentLanguage],
+          language: 'javascript',
+          theme: 'vs-dark',
+          automaticLayout: true,
+          minimap: { enabled: false },
+          fontSize: 14,
+        });
+
+        langSelect.addEventListener('change', () => {
+          currentLanguage = langSelect.value;
+          const model = editor.getModel();
+          monaco.editor.setModelLanguage(model, currentLanguage === 'cpp' ? 'cpp' : currentLanguage);
+          if (model.getValue().trim() === '' || model.getValue() === initialSamples['javascript']) {
+            editor.setValue(initialSamples[currentLanguage]);
+          }
+        });
+
+        runBtn.addEventListener('click', async () => {
+          setStatus('Running...');
+          outputEl.textContent = '';
+          const payload = {
+            language: currentLanguage,
+            code: editor.getValue(),
+            stdin: stdinEl.value || ''
+          };
+          try {
+            const res = await fetch('/api/run', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            let text = '';
+            if (data.timedOut) text += '[Timed out]\n';
+            if (typeof data.code === 'number') text += `[exit ${data.code}]\n`;
+            if (data.stdout) text += data.stdout;
+            if (data.stderr) text += (data.stdout ? '\n' : '') + data.stderr;
+            outputEl.textContent = text;
+          } catch (e) {
+            outputEl.textContent = 'Error: ' + e.message;
+          } finally {
+            setStatus('');
+          }
+        });
+
+        document.getElementById('clearOutput').addEventListener('click', ()=>{
+          outputEl.textContent = '';
+        });
+      });
+    </script>
+  </body>
+</html>
